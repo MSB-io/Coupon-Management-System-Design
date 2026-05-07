@@ -4,7 +4,7 @@ A high-performance system design implementation demonstrating a scalable, highly
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 ### Core Technologies
 *   **Backend Framework**: **FastAPI** (Python) 
     * *Why?* Unmatched async performance via ASGI, extreme type safety via Pydantic, and automatic Swagger/Redoc UI generation.
@@ -18,7 +18,7 @@ A high-performance system design implementation demonstrating a scalable, highly
 
 ---
 
-## 📂 Project Structure & Design Documents
+## Project Structure & Design Documents
 
 ### Source Code
 *   `main.py`: Houses the API Gateway imitation, validation endpoints, Rule Engines, in-memory caching logic, and Async Workers.
@@ -33,7 +33,7 @@ Make sure to read the comprehensive enterprise system design outlines included i
 
 ---
 
-## 🚀 Installation & Setup Instructions
+## Installation & Setup Instructions
 
 To avoid PEP-668 global installation conflicts (especially on macOS/Homebrew), this project firmly relies on isolated Virtual Environments.
 
@@ -63,7 +63,7 @@ To avoid PEP-668 global installation conflicts (especially on macOS/Homebrew), t
 
 ---
 
-## 🧪 Testing the APIs (No Frontend Required)
+## Testing the APIs (No Frontend Required)
 
 Because this utilizes FastAPI, interactive testing is automatically generated out of the box.
 
@@ -78,8 +78,8 @@ Because this utilizes FastAPI, interactive testing is automatically generated ou
 
 ---
 
-## ✅ Core Features Delivered
-*   🛡️ **Fraud Prevention**: Prevents per-user duplicate redemption via historical DB ledger lookups.
-*   ⚡ **Ultra-Low Latency Validation**: Offloads read operations to an explicit Cache Manager, completely shielding the database from peak traffic.
-*   🛤️ **Asynchronous Event Tracking**: Returns a discounted cart total instantly `< 100ms`, while silently writing usage data into background queues/threads.
-*   ⚖️ **Complex Rule Engines**: Enforces rules for Expiry timestamps, minimum cart value thresholds, and absolute total usage caps globally versus individually.
+## Core Features Delivered
+*   **Fraud Prevention**: Prevents per-user duplicate redemption via historical DB ledger lookups.
+*   **Ultra-Low Latency Validation**: Offloads read operations to an explicit Cache Manager, completely shielding the database from peak traffic.
+*   **Asynchronous Event Tracking**: Returns a discounted cart total instantly `< 100ms`, while silently writing usage data into background queues/threads.
+*   **Complex Rule Engines**: Enforces rules for Expiry timestamps, minimum cart value thresholds, and absolute total usage caps globally versus individually.
