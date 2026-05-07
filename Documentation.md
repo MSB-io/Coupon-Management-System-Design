@@ -21,8 +21,13 @@ Coupon validation happens at the most critical stage of user flow: **Checkout**.
 ### 4. Why idempotency is required in payment + coupon usage
 Idempotency ensures that if a user clicks the "Apply Coupon" button 5 times quickly, or if the network disconnects and retries the request automatically, the discount is only applied once, and the `CouponUsage` is only recorded once. We establish idempotency by binding the application to a unique `order_id`. If `order_id` X applies Coupon Y, a second retry with `order_id` X will be harmlessly caught and gracefully handled.
 
-### 5. Why async logging can improve performance
-Updating the database to record that "User X used Coupon Y" requires opening a database connection, executing an `INSERT` statement, and closing the transaction. This takes time. By pushing this action to a Background Task (Async Messaging), the API immediately calculates the discount and sends the response back to the client (`200 OK`) *before* the DB insertion finishes. This drastically reduces the latency perceived by the user.
+### 5. Why async logging (Message Queues) improves performance
+Updating the database to record that "User X used Coupon Y" requires opening a database connection, executing an `INSERT` statement, locking rows to increment usage keys, and closing the transaction. This takes significant time. 
+
+By utilizing **Message Queues** (like Kafka or RabbitMQ), the API instantly calculates the discount, pushes a tiny JSON event object to the Queue, and returns the response back to the client (`200 OK`) *before* any DB insertion finishes. This drastically reduces latency. A separate offline worker consumes the queue at its own pace and batch-inserts the data into the DB, protecting the database from traffic spikes.
+
+### 6. Why use Pub/Sub?
+When an admin updates a coupon (e.g., stopping a coupon early or changing its limit), those changes must immediately reflect across all active instances of the Coupon Service worldwide. Using a **Pub/Sub** model (like Redis Pub/Sub), the Admin Service publishes a `CouponUpdated` event. Every validation server is subscribed to this topic and instantly drops its cached version of that specific coupon, forcing it to fetch the fresh, accurate data on the next request. This solves the problem of "stale cache".
 
 ---
 
