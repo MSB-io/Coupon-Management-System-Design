@@ -87,10 +87,11 @@ graph TD
 ```
 
 ## 2. Low-Level Design (LLD): Component & Data Flow
-This details the internal classes, methods, and rule engine logic inside the Validation Service, including how payloads are structured and pushed to the queue.
+This details the internal classes, methods, and rule engine logic inside the Validation Service, including how payloads are structured and pushed to the queue, as well as external interfaces for Fraud.
 
 ```mermaid
 classDiagram
+    %% Core Controllers and Engines
     class CouponController {
         +validate_coupon(req: ValidateReq)
         +apply_discount(req: ApplyReq)
@@ -108,13 +109,17 @@ classDiagram
         +listen_invalidation_events()
     }
     
+    %% External Service Adapters
     class FraudPreventionService {
+        <<Gateway Component>>
         +check_user_limits(user_id, coupon_id)
-        +check_device_fingerprint(req_headers)
+        +call_auth_service(fingerprint)
     }
     
     class MessageProducer {
+        <<Message Broker>>
         +publish_usage_event(payload: JSON)
+        +route_to_dlq(payload, error_reason)
     }
 
     CouponController --> RuleEngine : Uses
@@ -124,7 +129,7 @@ classDiagram
 
     %% Queue Payload Structure
     class UsageEventPayload {
-        <<Queue Message>>
+        <<Kafka Message>>
         +String event_id
         +String coupon_code
         +String user_id
@@ -135,19 +140,22 @@ classDiagram
     MessageProducer ..> UsageEventPayload : Produces
 ```
 
-## 3. Detailed Sequence Diagram (Pub/Sub & Queues)
-This sequence shows the exact lifecycle of an Admin updating a coupon (Pub/Sub) and a User applying a coupon (Message Queue).
+## 3. Detailed Sequence Diagram (Edge Security & Queues)
+This sequence shows the exact lifecycle of an Admin updating a coupon (Pub/Sub) and a User applying a coupon through Edge security.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Admin
     actor User
+    participant Edge as WAF & Rate Limiter
     participant Gateway as API Gateway
     participant ValidationSvc as Coupon Service
+    participant AuthSvc as Auth & Fraud Svc
     participant Redis as Redis (Cache + PubSub)
-    participant Queue as Kafka / RabbitMQ
-    participant DB as Database
+    participant Queue as Kafka Topic
+    participant DB as Postgres DB
+    participant DLQ as Dead Letter Queue
     participant Worker as DB Worker
 
     %% PUB/SUB Flow
@@ -156,30 +164,40 @@ sequenceDiagram
     Gateway->>ValidationSvc: Route Request
     ValidationSvc->>DB: Update coupon limit in DB
     ValidationSvc->>Redis: Publish "INVALIDATE_SAVE50" to Topic
-    Redis-->>ValidationSvc: (All Instances) Drop local cache for SAVE50
+    Redis-->>ValidationSvc: Drop local cache for SAVE50
 
     %% QUEUE Flow
     Note over User, Worker: Queue Flow: High-traffic flash sale checkout
-    User->>Gateway: POST /coupon/apply (Code: SAVE50)
-    Gateway->>ValidationSvc: Route Request
+    User->>Edge: POST /coupon/apply (Code: SAVE50)
+    Edge->>Edge: Security Check (Pass)
+    Edge->>Gateway: Route Request
+    Gateway->>ValidationSvc: Forward
     
+    %% Fraud Check
+    ValidationSvc->>AuthSvc: Verify Session & Fingerprint
+    AuthSvc-->>ValidationSvc: 200 OK (Trusted)
+
+    %% Fetch & Rules
     ValidationSvc->>Redis: Fetch SAVE50 Rules
     Redis-->>ValidationSvc: Rules (Hit)
     
-    ValidationSvc->>ValidationSvc: RuleEngine: Validate Expiry & Min Value
-    ValidationSvc->>DB: Fraud Check (Has user_id used this?)
-    DB-->>ValidationSvc: Valid
-    
+    ValidationSvc->>ValidationSvc: RuleEngine: Validate Expiry & Limits
     ValidationSvc->>ValidationSvc: RuleEngine: Calculate final cart value (-$50)
     
     %% Async decoupling
-    ValidationSvc->>Queue: Publish Event {code: SAVE50, user: 123, order: 999}
+    ValidationSvc->>Queue: Publish Event {code: SAVE50, user: 123}
     ValidationSvc-->>Gateway: 200 OK (Calculated total)
-    Gateway-->>User: Show Discounted UI Immediately (< 50ms)
+    Gateway-->>Edge: 200 OK
+    Edge-->>User: Show Discounted UI Immediately (< 50ms)
     
     %% Eventual Consistency Worker
     Queue-->>Worker: Consume Event
-    Worker->>DB: Insert into CouponUsage table
-    Worker->>DB: Increment Coupon global usage_count
-    Worker->>Redis: Update global usage counter in Cache
+    alt Process Succeeds
+        Worker->>DB: Insert into CouponUsage table
+        Worker->>DB: Increment Global usage_count
+    else DB Down / Constrain Error
+        Worker-xDB: Insert Fails (Timeout / Transaction Error)
+        Worker->>Worker: Retry 3 times
+        Worker->>DLQ: Send to Dead Letter Queue for Manual Review
+    end
 ```
