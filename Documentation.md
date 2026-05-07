@@ -19,15 +19,26 @@ Coupon validation happens at the most critical stage of user flow: **Checkout**.
 *   **High Availability:** We favor Availability. By checking cache limits and using asynchronous tracking, we ensure the checkout system is *always* up and always responds instantly. The trade-off is eventual consistency: it might mean coupon 1000 and 1001 are processed concurrently before the DB lock triggers. For e-commerce companies, processing that one extra sale (Availability) is often worth slightly exceeding a global limit.
 
 ### 4. Why idempotency is required in payment + coupon usage
-Idempotency ensures that if a user clicks the "Apply Coupon" button 5 times quickly, or if the network disconnects and retries the request automatically, the discount is only applied once, and the `CouponUsage` is only recorded once. We establish idempotency by binding the application to a unique `order_id`. If `order_id` X applies Coupon Y, a second retry with `order_id` X will be harmlessly caught and gracefully handled.
+Idempotency ensures that if a user clicks the "Apply Coupon" button 5 times quickly, or if the network disconnects and retries the request automatically, the discount is only applied once, and the `CouponUsage` is only recorded once. We establish idempotency by binding the application to a unique `order_id`. If `order_id` X applies Coupon Y, a second retry with `order_id` X will be caught gracefully.
 
-### 5. Why async logging (Message Queues) improves performance
-Updating the database to record that "User X used Coupon Y" requires opening a database connection, executing an `INSERT` statement, locking rows to increment usage keys, and closing the transaction. This takes significant time. 
+### 5. Why async logging (Message Queues) improves performance & reliability
+Updating the database to record that "User X used Coupon Y" requires establishing a DB connection, executing an `INSERT/UPDATE`, locking rows to increment counters, and committing the transaction. Doing this synchronously adds latency and creates a single point of failure.
 
-By utilizing **Message Queues** (like Kafka or RabbitMQ), the API instantly calculates the discount, pushes a tiny JSON event object to the Queue, and returns the response back to the client (`200 OK`) *before* any DB insertion finishes. This drastically reduces latency. A separate offline worker consumes the queue at its own pace and batch-inserts the data into the DB, protecting the database from traffic spikes.
+By utilizing **Message Queues** (like Kafka), the Validation Service instantly calculates the discount, pushes a lightweight JSON event to the `UsageEvents` topic, and returns `200 OK` to the user in <50ms. 
+*   **Scale**: Background workers consume these events at their own pace, batching database inserts during flash sales to prevent DB Connection Exhaustion.
+*   **Fault Tolerance (DLQ)**: If the DB crashes, the messages safely wait in the queue. If an event repeatedly fails processing, it is routed to a **Dead Letter Queue (DLQ)** for manual engineering review, ensuring zero data loss.
 
-### 6. Why use Pub/Sub?
-When an admin updates a coupon (e.g., stopping a coupon early or changing its limit), those changes must immediately reflect across all active instances of the Coupon Service worldwide. Using a **Pub/Sub** model (like Redis Pub/Sub), the Admin Service publishes a `CouponUpdated` event. Every validation server is subscribed to this topic and instantly drops its cached version of that specific coupon, forcing it to fetch the fresh, accurate data on the next request. This solves the problem of "stale cache".
+### 6. Why use Pub/Sub for Cache Invalidation?
+When an admin updates a coupon (e.g., changing expiry or reducing stock), those changes must immediately reflect across all active instances worldwide to prevent overselling. 
+Using a **Pub/Sub** model (e.g., Redis Pub/Sub), the Admin Service publishes a `CouponUpdated` event. Every validation server/Redis Replica subscribed to this topic instantly invalidates or updates its cached version. This ensures high availability (fetching from cache) without suffering from stale data, establishing immediate eventual consistency.
+
+### 7. The importance of Edge Security (WAF & Rate Limiting)
+Attackers frequently use automated bots to test random dictionary combinations (e.g., `SAVE10`, `SAVE11`) to discover hidden discount codes. 
+*   **Web Application Firewall (WAF)** blocks known malicious IPs at the edge.
+*   **Rate Limiting** tracking prevents any single user token or IP from submitting more than 5 coupon attempts per minute, explicitly stopping brute-force guessing and shielding upstream microservices.
+
+### 8. Data Warehousing for Analytics
+Production databases must handle live, transactional user traffic (OLTP). Business stakeholders asking, *"What were the demographics of users who used SUMMER50?"*, run heavy, complex `JOIN` queries. To prevent these queries from crashing the checkout system, we perform a Nightly ETL (Extract, Transform, Load) dump of our Relational DB into a **Data Warehouse** (OLAP) like Snowflake or Redshift. Business Intelligence tools (Tableau) run safely against this separated analytical environment.
 
 ---
 

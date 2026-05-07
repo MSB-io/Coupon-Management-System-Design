@@ -36,8 +36,9 @@ FastAPI comes with a visually pleasing automated test dashboard.
 3. Try out the `/coupon/create` API to create a coupon.
 4. Try the `/coupon/apply` API passing the generated code, a cart value, user_id, and an order_id!
 
-## Features Implemented
+## Features Implemented (Code & Design)
 *   ✅ **Coupon Validation**: Checks Expiry Date, Min Cart Value, Total Limits.
 *   ✅ **Fraud Prevention**: DB check to prevent identical users from reusing limits on an order.
-*   ✅ **Low Latency Architecture**: Employs an explicit In-Memory Cache checking logic.
-*   ✅ **Async Tracking**: Uses FastAPI `BackgroundTasks` to offload DB `INSERT`s, dropping response time under 100ms.
+*   ✅ **Low Latency Architecture**: Employs an explicit In-Memory Cache tracking logic.
+*   ✅ **Async Tracking**: Uses FastAPI `BackgroundTasks` to simulate Kafka-style async queue offloading dropping response time under 100ms.
+*   ✅ **Enterprise System Design**: Full documentation and diagrams covering advanced distributed systems (CDN, WAF, Pub/Sub, Message Queues, DLQs, Read Replicas, and Data Warehousing).
