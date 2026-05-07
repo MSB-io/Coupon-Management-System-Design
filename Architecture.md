@@ -3,71 +3,87 @@
 Below are the highly detailed architectural representations of the Coupon Management & Redemption System, specifically incorporating advanced distributed system patterns such as Message Queues and Pub/Sub caching mechanisms.
 
 ## 1. High-Level Design (HLD) Architecture
-This diagram illustrates how the system scales horizontally and uses asynchronous messaging (Queues) and Pub/Sub for eventual consistency and fast read synchronization.
+This diagram illustrates an enterprise-grade, highly scalable distributed system. It includes aggressive edge-caching, rate limiting, independent scaling of reads vs writes, dead letter queues for fault tolerance, and data warehousing for analytics.
 
 ```mermaid
 graph TD
-    %% Define Client Layer
-    subgraph Client Layer
-        Web[Web Browser]
-        Mobile[Mobile App]
+    %% 1. Client & Edge Layer
+    subgraph Client and Edge Layer
+        App[Mobile / Web Client]
+        CDN[CDN - Edge Caching / Static Assets]
+        WAF[Web Application Firewall - Block Malicious IPs]
+        APIGW[API Gateway - Load Balancer & Routing]
+        RL[Rate Limiter - Prevent Brute Force Attacks]
     end
 
-    %% Define Gateway Layer
-    subgraph Edge Layer
-        WAF[Web Application Firewall]
-        APIGW[API Gateway / Load Balancer]
-    end
-
-    %% Define Service Layer
+    %% 2. Microservices Layer
     subgraph Microservices Layer
-        AdminSvc[Admin Coupon Service]
-        CouponSvc1[Coupon Validation Service - Instance 1]
-        CouponSvc2[Coupon Validation Service - Instance ...N]
-        OrderSvc[Order / Checkout Service]
+        AuthSvc[Auth & Fraud Service]
+        AdminSvc[Admin Rules Service]
+        CouponSvc[Validation Service - Auto-Scaling Cluster]
+        OrderSvc[Checkout / Order Service]
     end
 
-    %% Define Event/Messaging Layer
-    subgraph Event and Messaging Layer
-        PubSub((Redis Pub/Sub<br>Cache Sync Topic))
-        MsgQueue[[Message Queue<br>Kafka / RabbitMQ<br>Topic: CouponUsageEvent]]
+    %% 3. Distributed Cache Layer
+    subgraph High-Speed Cache Layer
+        RedisPrimary[(Redis Primary - Writes)]
+        RedisReplica[(Redis Replica - Reads)]
     end
 
-    %% Define Worker Layer
-    subgraph Worker Layer
-        UsageWorker1[Usage Tracking Worker]
-        UsageWorker2[Usage Tracking Worker]
+    %% 4. Event Streaming & Queues
+    subgraph Async Event and Messaging Layer
+        PubSub[[Redis Pub/Sub - Cache Sync]]
+        KafkaUsage[[Kafka Topic - UsageEvents]]
+        DLQ[[Dead Letter Queue - Failed Events]]
     end
 
-    %% Define Data Layer
-    subgraph Data Layer
-        Cache[(Distributed Cache<br>Redis Cluster)]
-        DB[(Relational DB<br>PostgreSQL / MySQL)]
-        ReadReplica[(DB Read Replica)]
+    %% 5. Worker Layer
+    subgraph Background Workers
+        UsageWorker[DB Insertion Worker]
+        AlertWorker[Fraud Detection Alert Worker]
     end
 
-    %% Connections
-    Web & Mobile --> WAF
+    %% 6. Persistence & Analytics Layer
+    subgraph Database and Storage Layer
+        DBPrimary[(PostgreSQL Primary<br/>ACID Writes)]
+        DBReplica[(PostgreSQL Read Replica)]
+        DataWarehouse[(Analytics DB<br/>Tableau / Snowflake)]
+    end
+
+    %% Connections - Edge
+    App --> CDN
+    CDN --> WAF
     WAF --> APIGW
+    APIGW --> RL
+
+    %% Connections - Routing
+    RL -->|POST /create| AdminSvc
+    RL -->|POST /apply| CouponSvc
+
+    %% Connections - Admin Write Flow
+    AdminSvc -->|1. Save New Rule| DBPrimary
+    AdminSvc -->|2. Invalidate Cache| PubSub
+    PubSub -.->|3. Synchronize| RedisPrimary
+    RedisPrimary ===|Replication| RedisReplica
+
+    %% Connections - Validation Read Flow
+    CouponSvc -->|1. Verify User/Device| AuthSvc
+    CouponSvc -->|2. Fetch Rules < 5ms| RedisReplica
+    RedisReplica -.->|3. Fallback on Miss| DBReplica
+    CouponSvc -->|4. Next Step| OrderSvc
+
+    %% Connections - Async Tracking (Queue)
+    CouponSvc -->|5. Fire & Forget| KafkaUsage
+    KafkaUsage ==>|Consume| UsageWorker
+    KafkaUsage ==>|Consume| AlertWorker
     
-    %% Admin Flow (Pub/Sub)
-    APIGW -->|POST /create| AdminSvc
-    AdminSvc -->|1. Write| DB
-    AdminSvc -->|2. Publish Update| PubSub
-    PubSub -.->|3. Broadcast Invalidation| CouponSvc1 & CouponSvc2
+    %% Worker to DB
+    UsageWorker -->|Batch Commit| DBPrimary
+    UsageWorker -.-x|Error / Retry Fail| DLQ
+    DBPrimary ===|Replication| DBReplica
     
-    %% Checkout Flow (Queue)
-    APIGW -->|POST /apply| CouponSvc1
-    CouponSvc1 <-->|Read| Cache
-    Cache -.->|Cache Miss| ReadReplica
-    
-    CouponSvc1 -->|Validate & Apply| OrderSvc
-    CouponSvc1 -->|Async Publish Event| MsgQueue
-    
-    %% Worker Flow
-    MsgQueue ==>|Consume| UsageWorker1 & UsageWorker2
-    UsageWorker1 -->|Batch Insert/Update| DB
-    DB -.->|Replication| ReadReplica
+    %% Analytics
+    DBReplica -.->|Nightly ETL Data Dump| DataWarehouse
 ```
 
 ## 2. Low-Level Design (LLD): Component & Data Flow
