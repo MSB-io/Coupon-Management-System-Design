@@ -28,7 +28,7 @@ graph TD
     end
 
     %% Define Event/Messaging Layer
-    subgraph Event & Messaging Layer (Queues & Pub/Sub)
+    subgraph Event and Messaging Layer
         PubSub((Redis Pub/Sub<br>Cache Sync Topic))
         MsgQueue[[Message Queue<br>Kafka / RabbitMQ<br>Topic: CouponUsageEvent]]
     end
